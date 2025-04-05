@@ -111,7 +111,6 @@ class KMeans():
         scatter_plot = self.ax1.scatter(self.sample[:, 0], self.sample[:, 1], self.sample[:, 2], c=self.cluster_idsample, cmap=self.cmap)
         centroids_plot = self.ax1.scatter(self.centroids[:, 0], self.centroids[:, 1], self.centroids[:, 2], s=400, c='black', marker='x')
         legend1 = self.ax1.legend(*scatter_plot.legend_elements(), loc="upper right", title="Cluster ID")
-        legend2 = self.ax1.legend([centroids_plot], ['Centroids'], loc="upper left", title="Markers")
         self.ax1.set_title('Scatter Plot of Clusters and Data Points', size=20)
         self.ax1.add_artist(legend1)
         self.ax1.set_xlabel('X', size=20)
