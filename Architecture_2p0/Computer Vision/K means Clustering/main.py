@@ -9,7 +9,8 @@ img = cv2.cvtColor(cv2.imread("Architecture_2p0\\Computer Vision\\images\\emma_s
 np.random.seed(17)
 img2d = np.float32(img.reshape((-1, 3)))
 
-KM = KMeans(img2d, 4, 5, np.shape(img))
+KM = KMeans(img2d, 6, 5, np.shape(img))
 KM.random_centroids()
 KM.MyKMeans()
 KM.visualize()
+plt.show(KM.clustered_image)
