@@ -121,3 +121,5 @@ class KMeans():
         self.clustered_image = self.cluster_idx.reshape(self.imshape[:2])
         self.ax2.imshow(self.clustered_image, cmap=self.cmap)
         self.ax2.set_title('Clustered Image', size=20)
+
+        plt.show()
