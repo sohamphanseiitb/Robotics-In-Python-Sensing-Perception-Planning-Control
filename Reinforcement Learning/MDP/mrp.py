@@ -56,15 +56,20 @@ class MRP():
 
         return states, rewards
     
-    def computeReturn(self):
+      
+    """
+    Inputs:
+    1. ts: Number of time steps to simulate, an integer.
+    """
+    def computeReturn(self, ts: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
-        states, rewards = self.simulateMRP(self.P, self.Rd, self.SInvD, self.ts)
+        states, rewards = self.simulateMRP(ts=ts)
         returns = np.zeros_like(rewards)
         returns[-1] = rewards[-1]
         for t in range(len(rewards) - 2, -1, -1):
             returns[t] = rewards[t] + self.gamma * returns[t+1]
 
-        return returns
+        return states, rewards, returns
 
 
 
