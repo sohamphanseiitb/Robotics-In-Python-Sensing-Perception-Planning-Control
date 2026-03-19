@@ -87,9 +87,8 @@ class MRP():
 
     """
     First principles method:
-    V(s) = E[G_t | S_t = s] = E[R_{t+1} + gamma * V(S_{t+1}) | S_t = s]
-                            = E[R_{t+1} | S_t = s] + gamma * E[V(S_{t+1}) | S_t = s]
-                            = ExpcRewardFunc(s) + gamma * sum_{s'} STM(s, s') * V(s')
+    V(s) = E[G_t | S_t = s]; hence we use a statistical method to compute the value function
+
     Inputs:
     1. N: number of times to simulate the MRP for each state, integer
     """
@@ -107,4 +106,32 @@ class MRP():
                 returns[i] = retSeq[0]
 
             self.V[each] = np.mean(returns)
+    
+    """
+    Above method we compute statistically. Let's now compute value function using the Bellman equation. 
+    Remember the value function is defined as:
+
+    V(s) = E[G_t | S_t = s] 
+                            = E[R_{t+1} + gamma * V(S_{t+1}) | S_t = s]
+                            = E[R_{t+1} | S_t = s] + gamma * E[V(S_{t+1}) | S_t = s]
+                            = ExpcRewardFunc(s) + gamma * sum_{s'} STM(s, s') * V(s')
+    
+    In the vector form, we can write it as:
+    v = R + gamma * P * v whis is the Bellman equation
+
+    Hence, we can write it as :
+    v = (I - gamma * P)^{-1} * R
+    """
+
+    def computeValueFunctionBellman(self):
+
+        t1 = np.eye(self.ns) - self.gamma * self.STM
+
+        # let's construct the reward vector R, which is of size (ns, )
+        # note that this is the expected reward vector
+        R = np.zeros(self.ns)
+        for s in self.allStates:
+            R[s] = self.ExpcRewardFunc(s, self.STM, self.RewardDict)
+        
+        self.VBellman = np.linalg.solve(t1, R)
         

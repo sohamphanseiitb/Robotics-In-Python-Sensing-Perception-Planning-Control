@@ -28,15 +28,9 @@ Inputs:
 3. R: Reward function, a dictionary mapping state index to reward value.
 """
 
-def rewardFunction(s: int, 
-                   P: np.ndarray, 
-                   R: dict)-> float:
-
-    # find all possible next states, and their probabilities
+def rewardFunction(s: int, P: np.ndarray, R: dict) -> float:
     nextStateProbs = P[s]
-
-    # do a weighted average with all states, and their rewards
-    reward = np.average(list(R.values()), weights=nextStateProbs)
-
-    return reward
+    # explicitly order rewards by state index
+    rewards = np.array([R[i] for i in range(len(nextStateProbs))])
+    return np.dot(nextStateProbs, rewards)
 
