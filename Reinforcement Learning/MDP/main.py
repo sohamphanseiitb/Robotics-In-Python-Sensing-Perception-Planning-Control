@@ -20,15 +20,19 @@ stateTransProbMat = np.array([[0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0],
 
 MarkovRP = mrp.MRP(ns=NUM_STATES,
                    allS=allStates,
-                   S=utils.stateTransition,
+                   STF=utils.stateTransition,
                    Sd=states,
                    P=stateTransProbMat,
                    R=utils.rewardFunction,
                    Rd=rewardVals,
-                   gamma=0.9,
-                   S0=1)
+                   gamma=0.9)
 
-statesSeq, rewardsSeq, returnSeq = MarkovRP.computeReturn(ts=simTimeSteps)
+# statesSeq, rewardsSeq, returnSeq = MarkovRP.computeReturn(ts=simTimeSteps, S0=states['Class1'])
 
-plt.plot(returnSeq)
-plt.show()
+# compute value function
+MarkovRP.computeValueFunction()
+
+print(dict(zip(states.keys(), MarkovRP.V)))
+
+# plt.plot(returnSeq)
+# plt.show()
