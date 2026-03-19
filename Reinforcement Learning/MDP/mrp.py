@@ -9,31 +9,31 @@ class MRP():
 
     """
     ns: number of states in the MRP
-    allS: all states
+    allStates: all states
     STF: state transition function
-    Sd: dictionary of states ['state name': state index]
-    P: state transition matrix
-    R: reward function (expected value of E[R_{t+1} | S_t = s])
-    Rd: dictionary of rewards
+    StateDict: dictionary of states ['state name': state index]
+    STM: state transition matrix
+    ExpcRewardFunc: reward function (expected value of E[R_{t+1} | S_t = s])
+    RewardDict: dictionary of rewards
     gamma: discount factor
     S0: initial state
     """
     def __init__(self, 
                  ns: int,
-                 allS: list[int],
+                 allStates: list[int],
                  STF: Callable[[np.ndarray, int, list[int]], int],
-                 Sd: dict[str, int], 
-                 P: np.ndarray, 
-                 R: Callable[[int, np.ndarray, dict], float], 
-                 Rd: dict[str, float],
+                 StateDict: dict[str, int], 
+                 STM: np.ndarray, 
+                 ExpcRewardFunc: Callable[[int, np.ndarray, dict], float], 
+                 RewardDict: dict[str, float],
                  gamma: float):
 
-        self.ns, self.allS, self.STF, self.Sd, \
-        self.P, self.R, self.Rd, \
-        self.gamma = ns, allS, STF, Sd, P, R, Rd, gamma
+        self.ns, self.allStates, self.STF, self.StateDict, \
+        self.STM, self.ExpcRewardFunc, self.RewardDict, \
+        self.gamma = ns, allStates, STF, StateDict, STM, ExpcRewardFunc, RewardDict, gamma
 
-        self.SInvD = {v: k for k, v in self.Sd.items()}
-        self.RInvD = {v: k for k, v in self.Rd.items()}
+        self.SInvD = {v: k for k, v in self.StateDict.items()}
+        self.RInvD = {v: k for k, v in self.RewardDict.items()}
      
     """
     Inputs:
@@ -53,8 +53,8 @@ class MRP():
         for i in range(1, ts):
 
             scurr = states[i-1] # current state
-            states[i] = self.STF(self.P, scurr, self.allS) # next state
-            rewards[i-1] = self.Rd[self.SInvD[states[i-1]]]
+            states[i] = self.STF(self.STM, scurr, self.allStates) # next state
+            rewards[i-1] = self.RewardDict[self.SInvD[states[i-1]]]
 
         return states, rewards
     
@@ -89,7 +89,7 @@ class MRP():
     First principles method:
     V(s) = E[G_t | S_t = s] = E[R_{t+1} + gamma * V(S_{t+1}) | S_t = s]
                             = E[R_{t+1} | S_t = s] + gamma * E[V(S_{t+1}) | S_t = s]
-                            = R(s) + gamma * sum_{s'} P(s, s') * V(s')
+                            = ExpcRewardFunc(s) + gamma * sum_{s'} STM(s, s') * V(s')
     Inputs:
     1. N: number of times to simulate the MRP for each state, integer
     """
@@ -99,7 +99,7 @@ class MRP():
         self.V = np.zeros(self.ns)
 
         # for each state, we need to simulate the MRP, N times startgin from that state, and take the average return
-        for each in self.allS:
+        for each in self.allStates:
 
             returns = np.zeros(N) # for each state, we will carry out N simulations, and in each simulation we will save G_0
             for i in range(N):

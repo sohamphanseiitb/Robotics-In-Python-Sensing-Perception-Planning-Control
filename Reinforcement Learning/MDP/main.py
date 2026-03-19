@@ -30,7 +30,7 @@ MarkovRP = mrp.MRP(ns=NUM_STATES,
 # statesSeq, rewardsSeq, returnSeq = MarkovRP.computeReturn(ts=simTimeSteps, S0=states['Class1'])
 
 # compute value function
-MarkovRP.computeValueFunction()
+MarkovRP.computeValueFunction(N=500)
 
 print(dict(zip(states.keys(), MarkovRP.V)))
 
