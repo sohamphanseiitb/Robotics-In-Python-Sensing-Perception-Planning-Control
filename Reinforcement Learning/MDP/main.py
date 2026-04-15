@@ -4,9 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # instantiate a class
-states = {'Class1': 0, 'Class2': 1, 'Class3': 2, 'Pass': 3, 'Pub': 4, 'Facebook': 5, 'Sleep': 6}
+states = {'Class1': 0, 
+          'Class2': 1, 
+          'Class3': 2, 
+          'Pass': 3, 
+          'Pub': 4, 
+          'Facebook': 5, 
+          'Sleep': 6}
 rewardVals = {'Class1': -2, 'Class2': -2, 'Class3': -2, 'Pass': 10, 'Pub': 1, 'Facebook': -1, 'Sleep': 0}
+
 allStates = list(states.values())
+
 simTimeSteps = 100
 NUM_STATES = 7
 np.random.seed(2)
@@ -25,16 +33,17 @@ MarkovRP = mrp.MRP(ns=NUM_STATES,
                    STM=stateTransProbMat,
                    ExpcRewardFunc=utils.rewardFunction,
                    RewardDict=rewardVals,
-                   gamma=0.9)
+                   gamma=1.0)
 
-# statesSeq, rewardsSeq, returnSeq = MarkovRP.computeReturn(ts=simTimeSteps, S0=states['Class1'])
+statesSeq, rewardsSeq, returnSeq = MarkovRP.computeReturn(ts=simTimeSteps, S0=states['Class1'])
+
 
 # compute value function
-MarkovRP.computeValueFunction(N=500)
+MarkovRP.computeValueFunction(N=1000)
 MarkovRP.computeValueFunctionBellman()
 
 print(dict(zip(states.keys(), MarkovRP.V)))
 print("With Bellamn: ", dict(zip(states.keys(), MarkovRP.VBellman)))
 
-# plt.plot(returnSeq)
-# plt.show()
+plt.plot(returnSeq)
+plt.show()

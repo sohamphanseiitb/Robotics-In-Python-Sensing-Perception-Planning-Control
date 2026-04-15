@@ -29,8 +29,9 @@ Inputs:
 """
 
 def rewardFunction(s: int, P: np.ndarray, R: dict) -> float:
-    nextStateProbs = P[s]
+
+    nextStateProbs = P[s, :]
     # explicitly order rewards by state index
-    rewards = np.array([R[i] for i in range(len(nextStateProbs))])
+    rewards = list(R.values()) #np.array([R[i] for i in range(len(nextStateProbs))])
     return np.dot(nextStateProbs, rewards)
 

@@ -133,5 +133,13 @@ class MRP():
         for s in self.allStates:
             R[s] = self.ExpcRewardFunc(s, self.STM, self.RewardDict)
         
-        self.VBellman = np.linalg.solve(t1, R)
+        try:
+            # try inverting t1: if not, this is a singular matrix: hence use the bootstrapping method
+            t1inv = np.linalg.inv(t1)
+            self.VBellman = t1inv*R.T
+        except np.linalg.LinAlgError as e:
+            print(f"State transition Probability Matrix is a {e}. Bellman equation cannot be solved by inversion. Try bootstrapping. ")
+        finally:
+            self.VBellman = np.zeros(len(R))
+
         
