@@ -28,3 +28,21 @@ Its a real, commercial robot made by Agile Robots, based in Munich. Robosuite sh
 
 ## Finale
 A cylindrical hole (d_h = 10mm h_h = 10mm) sits at world frame co-ordinates (x_h, y_h, z_h), hole axis is vertical (aligned with world z). A Franka Panda must insert a peg (d_p = 9mm, h_p = 10mm) into it - giving radial clearance r = 0.5mm. A wrist camera reports the hole pose relative to the peg, corrupted by (a) zero-mean per-frame noise of +-2mm and (b) a fixeed per-episode offset of upto +8mm/axis that is unknown to the controller. **Success**: peg fully seated (inserted to depth = 10mm) within 10s, with the contact-force magnitude ||F|| = \sqrt(F_x**2 + F_y**2 + F_z**2) never exceeeding 50N at any moment. Any breach of force or time limit is failure. 
+
+## Franka Panda's Observability
+Here's the core problem is to setup the environment right: you need to simulate a noisy camera in order to demonstrate your controller and filter work. Let's look at what all sensors Franka Panda has:
+
+1. robot0_joint_pos: (7,) (radians): the 7 joint angles
+2. robot0_joint_vel: (7,) (radians/sec): joint angular velocities
+3. robot0_eef_pos: (3,) (meters): end-effector (peg) position
+4. robot0_eef_quat: (4,) (unitless): end-effector orientation, quaternion (x, y, z, w) order
+5. robot0_eef_force: (3,) (N): contact force at the wrist
+6. robot0_eef_torque: (3,) (N): contact torque
+7. hole_pos, peg_pos, ...: (3,) (meters): task object ground truth
+
+If we get and *use* the exact hole_pos, then that's pointless. Inputs like joint encoders, end-effector pose from forward kinematics, force/torque sensor. hole_pos and other readings cannot be used directly.
+
+How do we construct the noisy camera?
+1. True camera reading: z_cam = hole_pos - peg_pos
+2. Add bias: upto +-8mm fixed per episode of peg insertion
+3. Add zero mean noise $$\sigma = 2mm$$
