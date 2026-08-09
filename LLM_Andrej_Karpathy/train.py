@@ -1,6 +1,9 @@
-import micrograd
+
 import numpy as np
 from utils import SGD, momentum, rmsprop, adam
+from micrograd.engine import Value
+from micrograd.nn import Module, Neuron, Layer, MLP
+
 
 def square_loss(y_pred: list, y_train: list):
 
@@ -13,7 +16,7 @@ def simple_train(x_train: list,
                  y_train: list,
                  x_val: list,
                  y_val: list,
-                 MLP1: micrograd.nn.MLP, 
+                 MLP1: MLP, 
                  lr: float = 0.005, 
                  beta: float = 0.9, 
                  epochs: int = 3000, 
@@ -22,7 +25,7 @@ def simple_train(x_train: list,
                  beta2: float = 0.999, 
                  algo: str = "grad",
                  lossFunc: str="square-loss"
-                 ) -> tuple[np.array[float], micrograd.nn.MLP]:
+                 ) -> tuple[np.array[float], MLP]:
 
     """
     MLP: Neural Net
