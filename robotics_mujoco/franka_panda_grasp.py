@@ -26,8 +26,11 @@ class PandaGrasper(gym.Env):
         self.hand_body_id = self.model.body("hand").id # comes from panda.xml <body name="hand" line 270
 
         # Gripper joints: used to grab cube
-        self.finger_1_id = self.model.body("left_finger").id
-        self.finger_2_id = self.model.body("right_finger").id
+        self.finger1_joint = self.model.joint("finger_joint1")
+        self.finger2_joint = self.model.joint("finger_joint2")
+
+        self.finger1_qposadr = self.finger1_joint.qposadr[0]
+        self.finger2_qposadr = self.finger2_joint.qposadr[0]
 
         # How do the body/joint IDs work?
         # Once mujoco loads the XML, every element, that has a `name` attribute is registered in internal name tables.
@@ -68,7 +71,7 @@ class PandaGrasper(gym.Env):
         qvel_arm = self.data.qvel[0:7].copy() 
 
         # gripper opening value (take average of both the fingers : # ask)
-        grip = 0.5 * (self.data.qpos[self.finger_1_id] + self.data.qpos[self.finger_2_id])
+        grip = 0.5 * (self.data.qpos[self.finger1_qposadr] + self.data.qpos[self.finger2_qposadr])
 
         # find position of cube and end effector
         cube_pos = self.data.body(self.cube_body_id).xpos.copy()
@@ -231,10 +234,10 @@ n_steps = 100
 for _ in range(n_steps):
     action = env.action_space.sample()
     obs, reward, term, trunc, info = env.step(action)
-    print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+    #print(f"Action: {action}")
+    print(f"Gripper position: {obs[14]}")
+    #print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
     if term or trunc:
         break
 
 env.close()
-
-        
