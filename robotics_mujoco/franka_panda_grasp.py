@@ -2,10 +2,14 @@ import numpy as np
 import mujoco
 import gymnasium as gym
 from gymnasium import spaces
+import mujoco.viewer
 
 # made new class derived from gym.Env
 class PandaGrasper(gym.Env):
-    metadata = {"render_modes": ["human", "rgb-array"],"render_fps": 50}
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 50
+        }
 
     def __init__(self, render_mode=None):
         super().__init__()
@@ -18,11 +22,15 @@ class PandaGrasper(gym.Env):
         # ID each object in the scene
         self.cube_body_id = self.model.body("cube").id # comes from <body name="cube">
 
+        '''
         # What is the hand?
-        # `link7` is the last arm link. `hand` is the body that represents the gripper mounting/palm.
-        # `left_finger` and `right_finger` are the 2 movable fingers
-        # `hand` is the rigid part of the enf-effector that the fingers are attached to. 
-        # Usig data.body("hand").xpos provides a convenient way for the end effector position
+
+        1. `link7` is the last arm link. `hand` is the body that represents the gripper mounting/palm.
+        2. `left_finger` and `right_finger` are the 2 movable fingers
+        3. `hand` is the rigid part of the enf-effector that the fingers are attached to. 
+        4. Usig data.body("hand").xpos provides a convenient way for the end effector position
+
+        '''
         self.hand_body_id = self.model.body("hand").id # comes from panda.xml <body name="hand" line 270
 
         # Gripper joints: used to grab cube
@@ -62,6 +70,12 @@ class PandaGrasper(gym.Env):
         # set max number of steps per episode: before truncation/termination
         self.max_episode_steps = 300
         self.current_step = 0
+
+        # multiple simulation substeps
+        self.n_substeps = 5
+
+        # rendering
+        self.viewer = None          # we will create it lazily
 
     # Write a function to obtain the observation from the environment
     def _get_obs(self):
@@ -170,7 +184,8 @@ class PandaGrasper(gym.Env):
         In reset we only need the derived quantities to be consistent, so mj_forward is enough (and faster). 
         In step we want the world to move forward in time, so we use mj_step.
         """
-        mujoco.mj_step(self.model, self.data)
+        for _ in range(self.n_substeps):
+            mujoco.mj_step(self.model, self.data)
 
         obs = self._get_obs()
 
@@ -190,54 +205,94 @@ class PandaGrasper(gym.Env):
         ee_pos = self.data.body(self.hand_body_id).xpos
         cube_pos = self.data.body(self.cube_body_id).xpos
         dist = np.linalg.norm(ee_pos - cube_pos)
+        reward = 0.0
 
-        reward = -dist        # larger the distance, worse the reward.
+        # reward for closing the distance
+        reward -= 3.0*dist
 
-        # add a bonus when gripper gets close enough:
-        if dist < 0.08:
-            reward += 0.5 * grip_command
+        # add a bonus when gripper gets close enough: if gripper is open then no bonus
+        if dist < 0.05:
+            reward += 1.5 * grip_command 
 
         # reward if the robot was able to lift
         if cube_pos[2] > 0.15:
-            reward += 2.0 # ask how does it know cube_pos[2] = y position 
-
+            reward += 4.0 * (cube_pos[2] - 0.12)
 
         """
-        Why is terminated always False?
-        Left out proper termination logic on purpose to focus on the mechanics.
-        Typical things that should set terminated = True:
-
         Success: cube is grasped and lifted above a height for N consecutive steps
         Failure: cube falls off the table (cube_pos[2] < 0.01)
         Failure: robot self-collides badly or joint limits are violated hard
         Timeout is usually put in truncated (the max_episode_steps check), not terminated
         """
-        terminated = False   # ask why it is always set to false? is there no case where it's absolute no-no? If roboto does this, episode waste.
+        success, failure = False, False
+
+        # robot was able to life the cube, gripper was sufficiently closed and the distance was low
+        if cube_pos[2] > 0.18 and grip_command > 0.6 and dist < 0.06:
+            success = True
+
+        # cube fell off the table, went too low
+        if cube_pos[2] < 0.03 or abs(cube_pos[0]) > 0.9 or abs(cube_pos[1]) > 0.6:
+            failure = True
+
+        # Terminal Bonuses
+        if success:
+            reward += 20.0
+        if failure:
+            reward -= 50.0
+
+        # action penalty: more control effort is less reward: don't include gripper command
+        reward -= 0.001 * np.sum(np.square(action[:7]))
+        
+        terminated = success or failure 
         truncated = self.current_step >= self.max_episode_steps
-        info = {"distance": dist, "cube_height": cube_pos[2]}
+        info = {"distance": dist, 
+                "cube_height": cube_pos[2],
+                "cube_x": cube_pos[0],
+                "cube_y":cube_pos[1],
+                "success": success,
+                "failure": failure,
+                "gripper": grip_command}
 
         return obs, reward, terminated, truncated, info
 
     def render(self):
-        pass
+        if self.render_mode == "human":
+            if self.viewer is None:
+                self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+            else:
+                self.viewer.sync()
 
     def close(self):
-        pass
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
 
 # Class Ends: write a test script
 
-env = PandaGrasper()
+env = PandaGrasper(render_mode="human")
 obs, info = env.reset()
 print("Obs shape:", obs.shape)
-n_steps = 100
+n_steps = 300
+
+import time
+
+# Main Loop:
 
 for _ in range(n_steps):
     action = env.action_space.sample()
+
+    # step the simulation with the next action
     obs, reward, term, trunc, info = env.step(action)
-    #print(f"Action: {action}")
-    print(f"Gripper position: {obs[14]}")
-    #print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+
+    env.render()
+
+    print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+    print(f"info: {info} \n")
+
     if term or trunc:
+        print("Episode Ended: ", info)
         break
+
+    time.sleep(2)
 
 env.close()
