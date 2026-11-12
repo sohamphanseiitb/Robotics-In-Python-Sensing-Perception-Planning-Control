@@ -208,15 +208,15 @@ class PandaGrasper(gym.Env):
         reward = 0.0
 
         # reward for closing the distance
-        reward -= 3.0*dist
+        reward -= 5.0*dist
 
         # add a bonus when gripper gets close enough: if gripper is open then no bonus
-        if dist < 0.05:
-            reward += 1.5 * grip_command 
+        if dist < 0.08:
+            reward += 2.0 * grip_command 
 
         # reward if the robot was able to lift
-        if cube_pos[2] > 0.15:
-            reward += 4.0 * (cube_pos[2] - 0.12)
+        if cube_pos[2] > 0.12:
+            reward += 10.0 * (cube_pos[2] - 0.12)
 
         """
         Success: cube is grasped and lifted above a height for N consecutive steps
@@ -231,14 +231,14 @@ class PandaGrasper(gym.Env):
             success = True
 
         # cube fell off the table, went too low
-        if cube_pos[2] < 0.03 or abs(cube_pos[0]) > 0.9 or abs(cube_pos[1]) > 0.6:
+        if cube_pos[2] < 0.01 or abs(cube_pos[0]) > 1.2 or abs(cube_pos[1]) > 1.0:
             failure = True
 
         # Terminal Bonuses
         if success:
             reward += 20.0
         if failure:
-            reward -= 50.0
+            reward -= 10.0
 
         # action penalty: more control effort is less reward: don't include gripper command
         reward -= 0.001 * np.sum(np.square(action[:7]))
@@ -269,30 +269,30 @@ class PandaGrasper(gym.Env):
 
 # Class Ends: write a test script
 
-env = PandaGrasper(render_mode="human")
-obs, info = env.reset()
-print("Obs shape:", obs.shape)
-n_steps = 300
+# env = PandaGrasper(render_mode="human")
+# obs, info = env.reset()
+# print("Obs shape:", obs.shape)
+# n_steps = 300
 
-import time
+# import time
 
-# Main Loop:
+# # Main Loop:
 
-for _ in range(n_steps):
-    action = env.action_space.sample()
+# for _ in range(n_steps):
+#     action = env.action_space.sample()
 
-    # step the simulation with the next action
-    obs, reward, term, trunc, info = env.step(action)
+#     # step the simulation with the next action
+#     obs, reward, term, trunc, info = env.step(action)
 
-    env.render()
+#     env.render()
 
-    print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
-    print(f"info: {info} \n")
+#     print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+#     print(f"info: {info} \n")
 
-    if term or trunc:
-        print("Episode Ended: ", info)
-        break
+#     if term or trunc:
+#         print("Episode Ended: ", info)
+#         break
 
-    time.sleep(2)
+#     time.sleep(2)
 
-env.close()
+# env.close()
