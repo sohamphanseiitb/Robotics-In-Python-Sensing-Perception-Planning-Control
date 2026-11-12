@@ -157,6 +157,48 @@ class PandaGrasper(gym.Env):
         info = {}
         return obs, info
 
+    def rewardValue(self, dist, grip_command, cube_pos, action):
+
+        reward = 0.0
+        
+        # reward for closing the distance
+        reward -= 5.0*dist
+        
+        # add a bonus when gripper gets close enough: if gripper is open then no bonus
+        if dist < 0.08:
+            reward += 2.0 * grip_command 
+        
+        # reward if the robot was able to lift
+        if cube_pos[2] > 0.12:
+            reward += 10.0 * (cube_pos[2] - 0.12)
+    
+        """
+        Success: cube is grasped and lifted above a height for N consecutive steps
+        Failure: cube falls off the table (cube_pos[2] < 0.01)
+        Failure: robot self-collides badly or joint limits are violated hard
+        Timeout is usually put in truncated (the max_episode_steps check), not terminated
+        """
+        success, failure = False, False
+        
+        # robot was able to life the cube, gripper was sufficiently closed and the distance was low
+        if cube_pos[2] > 0.18 and grip_command > 0.6 and dist < 0.06:
+            success = True
+        
+        # cube fell off the table, went too low
+        if cube_pos[2] < 0.01 or abs(cube_pos[0]) > 1.2 or abs(cube_pos[1]) > 1.0:
+            failure = True
+        
+        # Terminal Bonuses
+        if success:
+            reward += 20.0
+        if failure:
+            reward -= 10.0
+        
+        # action penalty: more control effort is less reward: don't include gripper command
+        reward -= 0.001 * np.sum(np.square(action[:7]))
+
+        return reward, success, failure
+
     # write a function to drive the observe-act-observe outer loop
     def step(self, action):
 
@@ -205,43 +247,8 @@ class PandaGrasper(gym.Env):
         ee_pos = self.data.body(self.hand_body_id).xpos
         cube_pos = self.data.body(self.cube_body_id).xpos
         dist = np.linalg.norm(ee_pos - cube_pos)
-        reward = 0.0
 
-        # reward for closing the distance
-        reward -= 5.0*dist
-
-        # add a bonus when gripper gets close enough: if gripper is open then no bonus
-        if dist < 0.08:
-            reward += 2.0 * grip_command 
-
-        # reward if the robot was able to lift
-        if cube_pos[2] > 0.12:
-            reward += 10.0 * (cube_pos[2] - 0.12)
-
-        """
-        Success: cube is grasped and lifted above a height for N consecutive steps
-        Failure: cube falls off the table (cube_pos[2] < 0.01)
-        Failure: robot self-collides badly or joint limits are violated hard
-        Timeout is usually put in truncated (the max_episode_steps check), not terminated
-        """
-        success, failure = False, False
-
-        # robot was able to life the cube, gripper was sufficiently closed and the distance was low
-        if cube_pos[2] > 0.18 and grip_command > 0.6 and dist < 0.06:
-            success = True
-
-        # cube fell off the table, went too low
-        if cube_pos[2] < 0.01 or abs(cube_pos[0]) > 1.2 or abs(cube_pos[1]) > 1.0:
-            failure = True
-
-        # Terminal Bonuses
-        if success:
-            reward += 20.0
-        if failure:
-            reward -= 10.0
-
-        # action penalty: more control effort is less reward: don't include gripper command
-        reward -= 0.001 * np.sum(np.square(action[:7]))
+        reward, success, failure = self.rewardValue(dist, grip_command, cube_pos, action)
         
         terminated = success or failure 
         truncated = self.current_step >= self.max_episode_steps
