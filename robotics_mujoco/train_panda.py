@@ -38,7 +38,7 @@ checkpoint_callback = CheckpointCallback(
 #4 Train
 print("Starting Model training: ")
 model.learn(
-    total_timesteps=200_000,
+    total_timesteps=500_000,
     callback=checkpoint_callback, 
     progress_bar=True
 )

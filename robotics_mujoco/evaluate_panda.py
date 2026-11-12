@@ -3,7 +3,7 @@ from franka_panda_grasp import PandaGrasper
 import time
 
 # load the trained model checkpoint
-model = PPO.load("models/panda_ppo_final")
+model = PPO.load("robotics_mujoco\\franka_panda_models\\panda_ppo_400000_steps.zip")
 
 # create environment with rendering
 env = PandaGrasper(render_mode="human")
