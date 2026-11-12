@@ -58,7 +58,8 @@ class PandaGrasper(gym.Env):
         ## positions and velocities of all 7 joints
         ## gripper state: open or close
         ## cube position, and end effector orientation
-        obs_dim = 7 + 7 + 1 + 3 + 3
+        ## relative position and distance
+        obs_dim = 7 + 7 + 1 + 3 + 3 + 3 + 1
         self.observation_space = spaces.Box(low=-np.inf, 
                                             high= np.inf, shape=(obs_dim,), dtype=np.float64)
  
@@ -91,7 +92,10 @@ class PandaGrasper(gym.Env):
         cube_pos = self.data.body(self.cube_body_id).xpos.copy()
         ee_pos = self.data.body(self.hand_body_id).xpos.copy()
 
-        return np.concatenate([qpos_arm, qvel_arm, [grip], cube_pos, ee_pos])
+        relative_pos = cube_pos - ee_pos
+        distance = np.linalg.norm(relative_pos)
+
+        return np.concatenate([qpos_arm, qvel_arm, [grip], cube_pos, ee_pos, relative_pos, [distance]])
 
     # write function to reset the simulation
     """
