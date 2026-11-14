@@ -52,16 +52,13 @@ class PandaGrasper(gym.Env):
         self.action_space = spaces.Box(low=np.array([-2.9]*7 + [0.0]),
                                        high=np.array([2.9]*7 + [1.0]),
                                        dtype=np.float64)
-
         # Observation:
-        ## [qpos_arm[7], qvel_arm[7], gripper_opening(1), cube_pos(3), ee_pos(3)]
-        ## positions and velocities of all 7 joints
-        ## gripper state: open or close
-        ## cube position, and end effector orientation
-        ## relative position and distance
-        obs_dim = 7 + 7 + 1 + 3 + 3 + 3 + 1
+        ## [qpos_arm[7], qvel_arm[7], finger1_pos(1), finger2_pos(1), rel_pos(3), dist(1), 
+        ##  left_tip_pos(3), right_tip_pos(3), left_contact(1), right_contact(1)]
+        ## = 7 + 7 + 1 + 1 + 3 + 1 + 3 + 3 + 1 + 1 = 28
+        obs_dim = 28
         self.observation_space = spaces.Box(low=-np.inf, 
-                                            high= np.inf, shape=(obs_dim,), dtype=np.float64)
+                                            high=np.inf, shape=(obs_dim,), dtype=np.float64)
  
         # set initial state of the arm 
         # commonly used ready pose for the Panda, similar to one used in mnay papers and original Franka demos. 
@@ -78,6 +75,8 @@ class PandaGrasper(gym.Env):
         # rendering
         self.viewer = None          # we will create it lazily
 
+        self.success_count = 0
+
     # Write a function to obtain the observation from the environment
     def _get_obs(self):
 
@@ -86,7 +85,11 @@ class PandaGrasper(gym.Env):
         qvel_arm = self.data.qvel[0:7].copy() 
 
         # gripper opening value (take average of both the fingers : # ask)
-        grip = 0.5 * (self.data.qpos[self.finger1_qposadr] + self.data.qpos[self.finger2_qposadr])
+        # grip = 0.5 * (self.data.qpos[self.finger1_qposadr] + self.data.qpos[self.finger2_qposadr])
+
+        # Individual finger positions (not average!)
+        finger1_pos = self.data.qpos[self.finger1_qposadr]
+        finger2_pos = self.data.qpos[self.finger2_qposadr]
 
         # find position of cube and end effector
         cube_pos = self.data.body(self.cube_body_id).xpos.copy()
@@ -95,7 +98,21 @@ class PandaGrasper(gym.Env):
         relative_pos = cube_pos - ee_pos
         distance = np.linalg.norm(relative_pos)
 
-        return np.concatenate([qpos_arm, qvel_arm, [grip], cube_pos, ee_pos, relative_pos, [distance]])
+        # add finger tip positions for contact detection
+        left_tip_pos = self.data.site("left_fingertip").xpos.copy()
+        right_tip_pos = self.data.site("right_fingertip").xpos.copy()
+        left_contact = self._check_contact("left_finger", "cube")
+        right_contact = self._check_contact("right_finger", "cube")
+        
+        # return np.concatenate([qpos_arm, qvel_arm, [grip], cube_pos, ee_pos, relative_pos, [distance]])
+        return np.concatenate([
+            qpos_arm, qvel_arm,             # 7 + 7 = 14
+            [finger1_pos, finger2_pos],     # 1 + 1 = 2 (scalars!)
+            relative_pos,                   # 3 
+            [distance],                     # 1
+            left_tip_pos, right_tip_pos,    # 3 + 3 = 6
+            [left_contact, right_contact]   # 1 + 1 = 2 (binary contact, each is True or False)
+        ])
 
     # write function to reset the simulation
     """
@@ -125,13 +142,29 @@ class PandaGrasper(gym.Env):
         self.data.ctrl[0:7] = self.home_qpos
         self.data.ctrl[7] = 0.0 # start with the gripper open
 
-        # Intialize random cube position for the arm # ask
-        self.data.qpos[self.model.joint("cube_joint").qposadr[0]:self.model.joint("cube_joint").qposadr[0]+3] = np.array([self.np_random.uniform(0.4, 0.6),
-                                                                                                                          self.np_random.uniform(-0.2, 0.2),
-                                                                                                                          0.05])
-        # ask where did th self.np_random came from
+        # # CURRICULUM: start easy, progress to hard
+        # if not hasattr(self, 'curriculum_level'):
+        #     self.curriculum_level = 0
 
-        # Orientation of the free joint can stay identity for now.
+        # if self.curriculum_level == 0:
+
+        #     # easy cube position
+        #     cube_x, cube_y = 0.5, 0.0
+
+        # elif self.curriculum_level == 1:
+
+        #     # bit harder
+        #     cube_x = self.np_random.uniform(.045, 0.55)
+        #     cube_y = self.np_random.uniform(-0.1, 0.1)
+
+        # else:
+
+        #     # hardest
+        #     cube_x = self.np_random.uniform(0.4, 0.6)
+        #     cube_y = self.np_random.uniform(-0.2, 0.2)
+
+        cube_x = self.np_random.uniform(0.4, 0.6)
+        cube_y = self.np_random.uniform(-0.2, 0.2)
 
         """
         A body that has a <freejoint> does not store its position in body.pos permanently.
@@ -152,6 +185,8 @@ class PandaGrasper(gym.Env):
         If we do not touch the quaternion part, it stays at the default (1, 0, 0, 0) which means “no rotation”. That is what “identity” means. For the first version we accept that the cube always starts axis-aligned.
         
         """
+        # print(self.model.joint("cube_joint").qposadr[0])
+        self.data.qpos[self.model.joint("cube_joint").qposadr[0]:self.model.joint("cube_joint").qposadr[0]+3] = [cube_x, cube_y, 0.05]
 
         # step ahead
         mujoco.mj_forward(self.model, self.data)
@@ -161,51 +196,86 @@ class PandaGrasper(gym.Env):
         info = {}
         return obs, info
 
-    def rewardValue(self, dist, grip_command, cube_pos, action):
+    def rewardValue(self, 
+                    dist, 
+                    finger1_pos, 
+                    finger2_pos, 
+                    cube_pos, 
+                    left_tip_pos, 
+                    right_tip_pos,
+                    left_contact, 
+                    right_contact, 
+                    action):
+
         reward = 0.0
 
         # 1. Main drive: get close
-        reward -= 5.0 * dist
+        reward -= 1.0 * dist
 
-        # 2. Progressive closeness bonuses
-        if dist < 0.10:
-            reward += 1.0
-        if dist < 0.06:
-            reward += 2.5
-        if dist < 0.04:
-            reward += 4.0
+        # 2. CONTACT REWARDS - critical for learning to grasp!
+        if left_contact: # if left contact happens:
+            reward += 5.0
+        if right_contact: # if right contact happens
+            reward += 5.0
+        if left_contact and right_contact: # if both fingers touch the side of the cube
+            reward += 12.0 # higher than sum of individuals
 
-        # 3. Gripper behavior (important)
-        if dist > 0.09:
-            # Far away → prefer open gripper
-            reward += 0.8 * (1.0 - grip_command)
-        else:
-            # Close → prefer closed gripper
-            reward += 2.0 * grip_command
+        # 3. Gripper closure - use fingertip distance (more reliable than joint pos)
+        finger_dist = np.linalg.norm(left_tip_pos - right_tip_pos)
+        grip_closed = finger_dist < 0.02  # fingertips close together = grasping
 
-        # 4. Lifting
-        if cube_pos[2] > 0.12:
-            reward += 10.0 * (cube_pos[2] - 0.12)
+        if left_contact and right_contact and grip_closed:
+            reward += 15.0 # strong reward for grasping
+        elif dist < 0.05 and not (left_contact or right_contact):
+            reward -= 2.0 # penalty for close but not touching
 
-        # 5. Success / Failure
-        success = False
-        failure = False
+        # 4. Lifting reward (only after grasp)
+        if left_contact and right_contact and grip_closed and cube_pos[2] > 0.08:
+            reward += 20.0 * (cube_pos[2] - 0.08) # higher the lift, higher the award
 
-        if cube_pos[2] > 0.18 and grip_command > 0.55 and dist < 0.06:
-            success = True
-
-        if cube_pos[2] < 0.01 or abs(cube_pos[0]) > 1.2 or abs(cube_pos[1]) > 1.0:
-            failure = True
-
+        # 5. Success: could lift above 15 cm
+        success = cube_pos[2] > 0.15 and grip_closed and left_contact and right_contact
         if success:
-            reward += 30.0
-        if failure:
-            reward -= 10.0
+            reward += 100
+            self.success_count += 1
 
-        # action penalty: more control effort is less reward: don't include gripper command
-        #reward -= 0.001 * np.sum(np.square(action[:7]))
+        # 6. Failure: false off the workspace or goes too low
+        failure = cube_pos[2] < 0.01 or abs(cube_pos[0]) > 1.0 or abs(cube_pos[1]) > 0.8
+        if failure:
+            reward -= 50.0
+
+        # 7. Action penalty:
+        reward -= 0.0001 * np.sum(np.square(action[:7]))
 
         return reward, success, failure
+
+    def _check_contact(self, body1_name, body2_name):
+        """Check if two bodies are in contact by checking their geoms"""
+        
+        # Get all geom IDs for each body
+        body1_id = self.model.body(body1_name).id
+        body2_id = self.model.body(body2_name).id
+        
+        # Get geom address ranges for each body
+        body1_geom_start = self.model.body_geomadr[body1_id]
+        body1_geom_num = self.model.body_geomnum[body1_id]
+        body1_geoms = set(range(body1_geom_start, body1_geom_start + body1_geom_num))
+        
+        body2_geom_start = self.model.body_geomadr[body2_id]
+        body2_geom_num = self.model.body_geomnum[body2_id]
+        body2_geoms = set(range(body2_geom_start, body2_geom_start + body2_geom_num))
+
+        for i in range(self.data.ncon):
+            contact = self.data.contact[i]
+            geom1 = contact.geom1
+            geom2 = contact.geom2
+            
+            # Check if contact is between the two bodies
+            if (geom1 in body1_geoms and geom2 in body2_geoms) or \
+               (geom2 in body1_geoms and geom1 in body2_geoms):
+                return 1.0
+
+        return 0.0
 
     # write a function to drive the observe-act-observe outer loop
     def step(self, action):
@@ -238,6 +308,16 @@ class PandaGrasper(gym.Env):
             mujoco.mj_step(self.model, self.data)
 
         obs = self._get_obs()
+        qpos_arm = obs[0:7]
+        qvel_arm = obs[7:14]
+        finger1_pos = obs[14]
+        finger2_pos = obs[15]
+        relative_pos = obs[16:19]
+        distance = obs[19]
+        left_tip_pos = obs[20:23]
+        right_tip_pos = obs[23:26]
+        left_contact = obs[26]
+        right_contact = obs[27]
 
         # Reward Shaping
 
@@ -256,7 +336,17 @@ class PandaGrasper(gym.Env):
         cube_pos = self.data.body(self.cube_body_id).xpos
         dist = np.linalg.norm(ee_pos - cube_pos)
 
-        reward, success, failure = self.rewardValue(dist, grip_command, cube_pos, action)
+        reward, success, failure = self.rewardValue(
+                                                    distance, 
+                                                    finger1_pos, 
+                                                    finger2_pos, 
+                                                    cube_pos,
+                                                    left_tip_pos, 
+                                                    right_tip_pos, 
+                                                    left_contact, 
+                                                    right_contact, 
+                                                    action
+                                                    )
         
         terminated = success or failure 
         truncated = self.current_step >= self.max_episode_steps
