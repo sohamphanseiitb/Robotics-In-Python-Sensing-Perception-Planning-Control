@@ -202,64 +202,70 @@ class PandaGrasper(gym.Env):
                     finger1_pos, 
                     finger2_pos, 
                     cube_pos, 
-                    ee_pos,                 # ← add this argument
+                    ee_pos,
                     left_tip_pos, 
                     right_tip_pos,
                     left_contact, 
                     right_contact, 
-                    action):
+                    action,
+                    hand_z_axis):                 # new argument
 
         reward = 0.0
 
-        # 1. Main drive: get close
+        # 1. Get close
         reward -= 1.5 * dist
 
-        # 2. Horizontal centering (encourage being above the cube)
+        # 2. Horizontal centering
         horizontal_error = np.linalg.norm(cube_pos[:2] - ee_pos[:2])
-        reward -= 2.0 * horizontal_error
+        reward -= 2.5 * horizontal_error
 
-        # 3. Prefer approaching from above when close
-        if dist < 0.12 and ee_pos[2] > cube_pos[2] + 0.04:
-            reward += 3.0
+        # 3. Approach from above
+        if dist < 0.15 and ee_pos[2] > cube_pos[2] + 0.05:
+            reward += 4.0
 
-        # 4. Contact rewards
+        # 4. Orientation: prefer top-down (hand z-axis pointing down)
+        if dist < 0.18:
+            alignment = np.dot(hand_z_axis, np.array([0.0, 0.0, -1.0]))
+            reward += 5.0 * max(alignment, 0.0)
+
+        # 5. Contact (kept modest)
         if left_contact:
-            reward += 5.0
+            reward += 1.5
         if right_contact:
-            reward += 5.0
+            reward += 1.5
         if left_contact and right_contact:
-            reward += 12.0
+            reward += 6.0
 
-        # 5. Gripper closure quality
+        # 6. Gripper closure
         finger_dist = np.linalg.norm(left_tip_pos - right_tip_pos)
         grip_closed = finger_dist < 0.025
 
         if left_contact and right_contact and grip_closed:
-            reward += 18.0
-        elif dist < 0.05 and not (left_contact or right_contact):
-            reward -= 2.0
+            reward += 8.0
+        elif dist < 0.04 and not (left_contact or right_contact):
+            reward -= 3.0                         # milder than -10
 
-        # 6. Lifting (only after a proper grasp)
+        # 7. Lifting
         if left_contact and right_contact and grip_closed and cube_pos[2] > 0.08:
-            reward += 25.0 * (cube_pos[2] - 0.08)
+            reward += 60.0 * (cube_pos[2] - 0.08)
 
-        # 7. Success
+        # 8. Success
         success = (cube_pos[2] > 0.15 and 
                 grip_closed and 
                 left_contact and 
                 right_contact)
         if success:
-            reward += 100.0
+            reward += 150.0
             self.success_count += 1
 
-        # 8. Failure
+        # 9. Failure
         failure = (cube_pos[2] < 0.01 or 
                 abs(cube_pos[0]) > 1.0 or 
                 abs(cube_pos[1]) > 0.8)
         if failure:
-            reward -= 50.0
+            reward -= 40.0
 
-        # 9. Small action penalty
+        # 10. Action penalty
         reward -= 0.0001 * np.sum(np.square(action[:7]))
 
         return reward, success, failure
@@ -351,8 +357,10 @@ class PandaGrasper(gym.Env):
         cube_pos = self.data.body(self.cube_body_id).xpos
         dist = np.linalg.norm(ee_pos - cube_pos)
 
-        reward, success, failure = self.rewardValue(
-                                                    distance, 
+        hand_rot = self.data.body(self.hand_body_id).xmat.reshape(3, 3)
+        hand_z_axis = hand_rot[:, 2]
+
+        reward, success, failure = self.rewardValue(distance, 
                                                     finger1_pos, 
                                                     finger2_pos, 
                                                     cube_pos,
@@ -361,8 +369,8 @@ class PandaGrasper(gym.Env):
                                                     right_tip_pos, 
                                                     left_contact, 
                                                     right_contact, 
-                                                    action
-                                                    )
+                                                    action,
+                                                    hand_z_axis)                                                    
         
         terminated = success or failure 
         truncated = self.current_step >= self.max_episode_steps
