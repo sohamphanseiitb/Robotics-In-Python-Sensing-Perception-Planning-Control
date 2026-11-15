@@ -28,10 +28,10 @@ model = PPO(
 )
 
 #3. Callbacks (optional but very useful)
-os.makedirs("models", exist_ok=True)
+os.makedirs("robotics_mujoco\\checkpoints", exist_ok=True)
 checkpoint_callback = CheckpointCallback(
     save_freq=10_000,
-    save_path="robotics_mujoco\\franka_panda_models",
+    save_path="robotics_mujoco\\checkpoints",
     name_prefix="panda_ppo"
 )
 
@@ -44,5 +44,5 @@ model.learn(
 )
 
 #5. Save final model
-model.save("models/panda_ppo_final")
+model.save("robotics_mujoco\\panda_ppo_final")
 print("Training finished and model saved.")

@@ -12,6 +12,7 @@ class PandaGrasper(gym.Env):
         }
 
     def __init__(self, render_mode=None):
+
         super().__init__()
         self.render_mode = render_mode
 
@@ -38,7 +39,7 @@ class PandaGrasper(gym.Env):
         self.finger2_joint = self.model.joint("finger_joint2")
 
         self.finger1_qposadr = self.finger1_joint.qposadr[0]
-        self.finger2_qposadr = self.finger2_joint.qposadr[0]
+        self.finger2_qposadr = self.finger2_joint.qposadr[0]   
 
         # How do the body/joint IDs work?
         # Once mujoco loads the XML, every element, that has a `name` attribute is registered in internal name tables.
@@ -201,6 +202,7 @@ class PandaGrasper(gym.Env):
                     finger1_pos, 
                     finger2_pos, 
                     cube_pos, 
+                    ee_pos,                 # ← add this argument
                     left_tip_pos, 
                     right_tip_pos,
                     left_contact, 
@@ -210,41 +212,54 @@ class PandaGrasper(gym.Env):
         reward = 0.0
 
         # 1. Main drive: get close
-        reward -= 1.0 * dist
+        reward -= 1.5 * dist
 
-        # 2. CONTACT REWARDS - critical for learning to grasp!
-        if left_contact: # if left contact happens:
-            reward += 5.0
-        if right_contact: # if right contact happens
-            reward += 5.0
-        if left_contact and right_contact: # if both fingers touch the side of the cube
-            reward += 12.0 # higher than sum of individuals
+        # 2. Horizontal centering (encourage being above the cube)
+        horizontal_error = np.linalg.norm(cube_pos[:2] - ee_pos[:2])
+        reward -= 2.0 * horizontal_error
 
-        # 3. Gripper closure - use fingertip distance (more reliable than joint pos)
+        # 3. Prefer approaching from above when close
+        if dist < 0.12 and ee_pos[2] > cube_pos[2] + 0.04:
+            reward += 3.0
+
+        # 4. Contact rewards
+        if left_contact:
+            reward += 5.0
+        if right_contact:
+            reward += 5.0
+        if left_contact and right_contact:
+            reward += 12.0
+
+        # 5. Gripper closure quality
         finger_dist = np.linalg.norm(left_tip_pos - right_tip_pos)
-        grip_closed = finger_dist < 0.02  # fingertips close together = grasping
+        grip_closed = finger_dist < 0.025
 
         if left_contact and right_contact and grip_closed:
-            reward += 15.0 # strong reward for grasping
+            reward += 18.0
         elif dist < 0.05 and not (left_contact or right_contact):
-            reward -= 2.0 # penalty for close but not touching
+            reward -= 2.0
 
-        # 4. Lifting reward (only after grasp)
+        # 6. Lifting (only after a proper grasp)
         if left_contact and right_contact and grip_closed and cube_pos[2] > 0.08:
-            reward += 20.0 * (cube_pos[2] - 0.08) # higher the lift, higher the award
+            reward += 25.0 * (cube_pos[2] - 0.08)
 
-        # 5. Success: could lift above 15 cm
-        success = cube_pos[2] > 0.15 and grip_closed and left_contact and right_contact
+        # 7. Success
+        success = (cube_pos[2] > 0.15 and 
+                grip_closed and 
+                left_contact and 
+                right_contact)
         if success:
-            reward += 100
+            reward += 100.0
             self.success_count += 1
 
-        # 6. Failure: false off the workspace or goes too low
-        failure = cube_pos[2] < 0.01 or abs(cube_pos[0]) > 1.0 or abs(cube_pos[1]) > 0.8
+        # 8. Failure
+        failure = (cube_pos[2] < 0.01 or 
+                abs(cube_pos[0]) > 1.0 or 
+                abs(cube_pos[1]) > 0.8)
         if failure:
             reward -= 50.0
 
-        # 7. Action penalty:
+        # 9. Small action penalty
         reward -= 0.0001 * np.sum(np.square(action[:7]))
 
         return reward, success, failure
@@ -341,6 +356,7 @@ class PandaGrasper(gym.Env):
                                                     finger1_pos, 
                                                     finger2_pos, 
                                                     cube_pos,
+                                                    ee_pos,
                                                     left_tip_pos, 
                                                     right_tip_pos, 
                                                     left_contact, 
