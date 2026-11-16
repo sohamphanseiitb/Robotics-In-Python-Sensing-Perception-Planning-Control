@@ -22,11 +22,11 @@ print(env.action_dim)
 print("\n ----- Action Bounds -----")
 print(env.action_spec)
 
-# Start a sim
-for i in range(200):
-    action = np.random.randn(env.action_dim) * 0.1  # sample random action
-    obs, reward, done, info = env.step(action)
-    env.render()
-    time.sleep(2)
-    if done:
-        break
+# # Start a sim
+# for i in range(200):
+#     action = np.random.randn(env.action_dim) * 0.1  # sample random action
+#     obs, reward, done, info = env.step(action)
+#     env.render()
+#     time.sleep(2)
+#     if done:
+#         break

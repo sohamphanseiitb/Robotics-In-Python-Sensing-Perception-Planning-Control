@@ -306,54 +306,64 @@ class PandaGrasper(gym.Env):
 
     def classical_controller(self, data, cube_pos, ee_pos):
         """
-        Improved classical controller with clearer phases and better gripper timing.
-        Returns 8D action: 7 joint targets + gripper command
+        Classical controller that aims for a top-down antipodal grasp.
         Gripper convention: 0.0 = closed, 1.0 = open
         """
-        dist = np.linalg.norm(ee_pos - cube_pos)
+        
+        # Current state
         q = data.qpos[0:7].copy()
+        dist = np.linalg.norm(ee_pos - cube_pos)
         horizontal_error = np.linalg.norm((cube_pos - ee_pos)[:2])
+        height_above_cube = ee_pos[2] - cube_pos[2]
 
-        # Force a high, centered approach first
-        if horizontal_error > 0.035 or ee_pos[2] < cube_pos[2] + 0.11:
-            # Stay high until centered and high enough
+        # Fingertip positions (sites)
+        left_tip  = data.site("left_fingertip").xpos.copy()
+        right_tip = data.site("right_fingertip").xpos.copy()
+        midpoint  = 0.5 * (left_tip + right_tip)
+        midpoint_error = np.linalg.norm(midpoint - cube_pos)
+
+        # ---------- 1. Phased target position ----------
+        if horizontal_error > 0.03 or height_above_cube < 0.12:
+            # Phase 1: get high and centered
             target_pos = cube_pos + np.array([0.0, 0.0, 0.16])
-        elif horizontal_error > 0.02 or dist > 0.09:
-            # Intermediate: begin careful descent
-            target_pos = cube_pos + np.array([0.0, 0.0, 0.09])
+        elif height_above_cube > 0.06:
+            # Phase 2: careful vertical descent
+            target_pos = cube_pos + np.array([0.0, 0.0, 0.08])
         else:
-            # Final approach
+            # Phase 3: final grasp height
             target_pos = cube_pos + np.array([0.0, 0.0, 0.035])
 
-        # Position error with extra weight on horizontal axes
+        # Strong horizontal correction
         pos_error = target_pos - ee_pos
-        pos_error[0] *= 2.0
-        pos_error[1] *= 2.0
+        pos_error[0] *= 2.2
+        pos_error[1] *= 2.2
 
-        # ---------- Differential IK (damped least squares) ----------
+        # ---------- 2. Differential IK (damped least squares) ----------
         jacp = np.zeros((3, self.model.nv))
         mujoco.mj_jacBody(self.model, data, jacp, None, self.hand_body_id)
-        J = jacp[:, 0:7]
+        J = jacp[:, :7]
 
         damping = 1e-4
         JTJ = J.T @ J + damping * np.eye(7)
         dq = np.linalg.solve(JTJ, J.T @ pos_error)
 
-        # Adaptive step size
         error_norm = np.linalg.norm(pos_error)
-        alpha = np.clip(0.7 * error_norm, 0.18, 0.65)
+        alpha = np.clip(0.75 * error_norm, 0.2, 0.7)
         q_target = np.clip(q + alpha * dq, -2.8, 2.8)
 
-        # ---------- Gripper logic (0=closed, 1=open) ----------
-        if horizontal_error > 0.025 or ee_pos[2] < cube_pos[2] + 0.07 or dist > 0.08:
-            grip = 1.0      # fully open
+        # ---------- 3. Gripper logic ----------
+        # Keep gripper open until geometry looks good
+        if (horizontal_error > 0.022 or
+            height_above_cube > 0.07 or
+            midpoint_error > 0.03 or
+            dist > 0.075):
+            grip = 1.0          # open
         else:
-            close_factor = np.clip((0.08 - dist) / 0.04, 0.0, 1.0)
+            # Close once we are close and well aligned
+            close_factor = np.clip((0.06 - dist) / 0.03, 0.0, 1.0)
             grip = 1.0 - close_factor
 
-        action = np.concatenate([q_target, [grip]])
-        return action
-
+        return np.concatenate([q_target, [grip]])
 
     # write a function to drive the observe-act-observe outer loop
     def step(self, policy_action):
