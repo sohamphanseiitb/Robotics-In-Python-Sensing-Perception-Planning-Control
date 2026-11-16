@@ -48,10 +48,11 @@ class PandaGrasper(gym.Env):
         ## 7 arm joint values + 1 gripper command
         ## define action-space with low and high action values
 
-        # where did the -2.9 to 2.9 come from?
         ## approximately joint limits of the Panda, (in radians)
-        self.action_space = spaces.Box(low=np.array([-2.9]*7 + [0.0]),
-                                       high=np.array([2.9]*7 + [1.0]),
+        # earlier were -2.9 and 2.9, now changed to -0.3 and 0.3 to accomodate for additional inputs
+        # coming from base controller
+        self.action_space = spaces.Box(low=np.array([-0.2]*7 + [-0.3]),
+                                       high=np.array([0.2]*7 + [0.3]),
                                        dtype=np.float64)
         # Observation:
         ## [qpos_arm[7], qvel_arm[7], finger1_pos(1), finger2_pos(1), rel_pos(3), dist(1), 
@@ -228,6 +229,11 @@ class PandaGrasper(gym.Env):
             alignment = np.dot(hand_z_axis, np.array([0.0, 0.0, -1.0]))
             reward += 5.0 * max(alignment, 0.0)
 
+        # fingers are grasping the cube from adjacent faces which is a problem  
+        midpoint = 0.5 * (left_tip_pos + right_tip_pos)
+        midpoint_error = np.linalg.norm(midpoint - cube_pos)
+        reward -= 6.0 * midpoint_error
+
         # 5. Contact (kept modest)
         if left_contact:
             reward += 1.5
@@ -298,14 +304,82 @@ class PandaGrasper(gym.Env):
 
         return 0.0
 
-    # write a function to drive the observe-act-observe outer loop
-    def step(self, action):
+    def classical_controller(self, data, cube_pos, ee_pos):
+        """
+        Improved classical controller with clearer phases and better gripper timing.
+        Returns 8D action: 7 joint targets + gripper command
+        Gripper convention: 0.0 = closed, 1.0 = open
+        """
+        dist = np.linalg.norm(ee_pos - cube_pos)
+        q = data.qpos[0:7].copy()
+        horizontal_error = np.linalg.norm((cube_pos - ee_pos)[:2])
 
+        # Force a high, centered approach first
+        if horizontal_error > 0.035 or ee_pos[2] < cube_pos[2] + 0.11:
+            # Stay high until centered and high enough
+            target_pos = cube_pos + np.array([0.0, 0.0, 0.16])
+        elif horizontal_error > 0.02 or dist > 0.09:
+            # Intermediate: begin careful descent
+            target_pos = cube_pos + np.array([0.0, 0.0, 0.09])
+        else:
+            # Final approach
+            target_pos = cube_pos + np.array([0.0, 0.0, 0.035])
+
+        # Position error with extra weight on horizontal axes
+        pos_error = target_pos - ee_pos
+        pos_error[0] *= 2.0
+        pos_error[1] *= 2.0
+
+        # ---------- Differential IK (damped least squares) ----------
+        jacp = np.zeros((3, self.model.nv))
+        mujoco.mj_jacBody(self.model, data, jacp, None, self.hand_body_id)
+        J = jacp[:, 0:7]
+
+        damping = 1e-4
+        JTJ = J.T @ J + damping * np.eye(7)
+        dq = np.linalg.solve(JTJ, J.T @ pos_error)
+
+        # Adaptive step size
+        error_norm = np.linalg.norm(pos_error)
+        alpha = np.clip(0.7 * error_norm, 0.18, 0.65)
+        q_target = np.clip(q + alpha * dq, -2.8, 2.8)
+
+        # ---------- Gripper logic (0=closed, 1=open) ----------
+        if horizontal_error > 0.025 or ee_pos[2] < cube_pos[2] + 0.07 or dist > 0.08:
+            grip = 1.0      # fully open
+        else:
+            close_factor = np.clip((0.08 - dist) / 0.04, 0.0, 1.0)
+            grip = 1.0 - close_factor
+
+        action = np.concatenate([q_target, [grip]])
+        return action
+
+
+    # write a function to drive the observe-act-observe outer loop
+    def step(self, policy_action):
+
+        # clip policy action
+        policy_action = np.clip(policy_action, 
+                                self.action_space.low, 
+                                self.action_space.high)
+
+        # testing
+        policy_action = np.zeros_like(policy_action)
+
+        # compute action from base controller
+        base_action = self.classical_controller(self.data,
+                                                self.data.body(self.cube_body_id).xpos,
+                                                self.data.body(self.hand_body_id).xpos)
+
+        final_action = base_action + policy_action
+        final_action[:7] = np.clip(final_action[:7], -2.9, 2.9)
+        final_action[7] = np.clip(final_action[7], 0.0, 1.0)
+        
         self.current_step += 1
 
         # split action
-        joint_targets = action[:7]
-        grip_command = action[7]   # we are normalizing action between 0, 1 hence [0, 1] expected here
+        joint_targets = final_action[:7]
+        grip_command = final_action[7]   # we are normalizing action between 0, 1 hence [0, 1] expected here
 
         # apply joint targets
         self.data.ctrl[0:7] = joint_targets
@@ -369,7 +443,7 @@ class PandaGrasper(gym.Env):
                                                     right_tip_pos, 
                                                     left_contact, 
                                                     right_contact, 
-                                                    action,
+                                                    final_action,
                                                     hand_z_axis)                                                    
         
         terminated = success or failure 
@@ -398,30 +472,28 @@ class PandaGrasper(gym.Env):
 
 # Class Ends: write a test script
 
-# env = PandaGrasper(render_mode="human")
-# obs, info = env.reset()
-# print("Obs shape:", obs.shape)
-# n_steps = 300
+env = PandaGrasper(render_mode="human")
+obs, info = env.reset()
+print("Obs shape:", obs.shape)
+n_steps = 300
 
-# import time
+import time
 
-# # Main Loop:
+for _ in range(n_steps):
+    action = env.action_space.sample()
 
-# for _ in range(n_steps):
-#     action = env.action_space.sample()
+    # step the simulation with the next action
+    obs, reward, term, trunc, info = env.step(action)
 
-#     # step the simulation with the next action
-#     obs, reward, term, trunc, info = env.step(action)
+    env.render()
 
-#     env.render()
+    print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+    print(f"info: {info} \n")
 
-#     print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
-#     print(f"info: {info} \n")
+    if term or trunc:
+        print("Episode Ended: ", info)
+        break
 
-#     if term or trunc:
-#         print("Episode Ended: ", info)
-#         break
+    time.sleep(0.2)
 
-#     time.sleep(2)
-
-# env.close()
+env.close()
