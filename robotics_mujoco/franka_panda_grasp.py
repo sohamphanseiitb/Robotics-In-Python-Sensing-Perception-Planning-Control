@@ -414,14 +414,14 @@ class PandaGrasper(gym.Env):
                                 self.action_space.high)
 
         # testing
-        policy_action = np.zeros_like(policy_action)
+        # policy_action = np.zeros_like(policy_action)
 
         # compute action from base controller
         base_action = self.classical_controller(self.data,
                                                 self.data.body(self.cube_body_id).xpos,
                                                 self.data.body(self.hand_body_id).xpos)
 
-        final_action = base_action + policy_action
+        final_action = base_action + 0.2*policy_action
         final_action[:7] = np.clip(final_action[:7], -2.9, 2.9)
         final_action[7] = np.clip(final_action[7], 0.0, 1.0)
         
@@ -522,24 +522,24 @@ class PandaGrasper(gym.Env):
 
 # Class Ends: write a test script
 
-env = PandaGrasper(render_mode="human")
-obs, info = env.reset()
-print("Obs shape:", obs.shape)
-n_steps = 300
+# env = PandaGrasper(render_mode="human")
+# obs, info = env.reset()
+# print("Obs shape:", obs.shape)
+# n_steps = 300
 
-import time
-for _ in range(n_steps):
-    action = env.action_space.sample()
+# import time
+# for _ in range(n_steps):
+#     action = env.action_space.sample()
 
-    # step the simulation with the next action
-    obs, reward, term, trunc, info = env.step(action)
-    env.render()
+#     # step the simulation with the next action
+#     obs, reward, term, trunc, info = env.step(action)
+#     env.render()
 
-    print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
-    print(f"info: {info} \n")
+#     print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+#     print(f"info: {info} \n")
 
-    if term or trunc:
-        print("Episode Ended: ", info)
-        break
-    time.sleep(0.2)
-env.close()
+#     if term or trunc:
+#         print("Episode Ended: ", info)
+#         break
+#     time.sleep(0.2)
+# env.close()
