@@ -78,6 +78,7 @@ class PandaGrasper(gym.Env):
         self.viewer = None          # we will create it lazily
 
         self.success_count = 0
+        self.grasp_state = "approach"   # "approach" -> "closed" -> "lift"
 
     # Write a function to obtain the observation from the environment
     def _get_obs(self):
@@ -167,6 +168,9 @@ class PandaGrasper(gym.Env):
 
         cube_x = self.np_random.uniform(0.4, 0.6)
         cube_y = self.np_random.uniform(-0.2, 0.2)
+
+        # set state machine
+        self.grasp_state = "approach"
 
         """
         A body that has a <freejoint> does not store its position in body.pos permanently.
@@ -309,32 +313,63 @@ class PandaGrasper(gym.Env):
         Classical controller that aims for a top-down antipodal grasp.
         Gripper convention: 0.0 = closed, 1.0 = open
         """
-        
-        # Current state
+        # Current state of franka_panda
         q = data.qpos[0:7].copy()
-        dist = np.linalg.norm(ee_pos - cube_pos)
-        horizontal_error = np.linalg.norm((cube_pos - ee_pos)[:2])
-        height_above_cube = ee_pos[2] - cube_pos[2]
+
+        # metrics
+        dist = np.linalg.norm(ee_pos - cube_pos) # distance between end effector and cube
+        horizontal_error = np.linalg.norm((cube_pos - ee_pos)[:2]) # horizontaal distance between end effector and cube
+        height_from_cube = abs(ee_pos[2] - cube_pos[2])
 
         # Fingertip positions (sites)
         left_tip  = data.site("left_fingertip").xpos.copy()
         right_tip = data.site("right_fingertip").xpos.copy()
-        midpoint  = 0.5 * (left_tip + right_tip)
-        midpoint_error = np.linalg.norm(midpoint - cube_pos)
+        midpoint_pos  = 0.5 * (left_tip + right_tip) # position of midpoint of two fingers
+        midpoint_error = np.linalg.norm(midpoint_pos - cube_pos)
 
-        # ---------- 1. Phased target position ----------
-        if horizontal_error > 0.03 or height_above_cube < 0.12:
-            # Phase 1: get high and centered
-            target_pos = cube_pos + np.array([0.0, 0.0, 0.16])
-        elif height_above_cube > 0.06:
-            # Phase 2: careful vertical descent
-            target_pos = cube_pos + np.array([0.0, 0.0, 0.08])
+        # ---------- State machine ----------
+        # approach -> closed -> lift
+        if self.grasp_state == "approach" and midpoint_error < 0.02:
+            self.grasp_state = "closed"
+
+        if self.grasp_state == "closed":
+            self.grasp_state = "lift"
+
+        # ---------- Target + gripper depending on state ----------
+        if self.grasp_state == "lift":
+            # Keep gripper closed and go straight up
+            target_pos = midpoint_pos.copy()
+            target_pos[2] = cube_pos[2] + 0.18
+            grip = 0.0
         else:
-            # Phase 3: final grasp height
-            target_pos = cube_pos + np.array([0.0, 0.0, 0.035])
+            # Phase 1: Coarse adjustment
 
-        # Strong horizontal correction
-        pos_error = target_pos - ee_pos
+            ## Phase 1.1 First Adjust height and bring midpoint_pos 5 cm over the cube
+            if height_from_cube > 0.2:
+                target_pos = midpoint_pos.copy()
+                target_pos[2] = cube_pos[2] + 0.1
+
+            ## Phase 1.2 Vertical adjustment complete: arm hovering 10 cm above the cube
+            ## Adjust horizontal error
+            elif horizontal_error > 0.05:
+                target_pos = midpoint_pos.copy()
+                target_pos[:2] = cube_pos[:2]
+
+            ## Phase 1.3 Micro Adjustment: both vertical and horizontal coarse adjustment done
+            ## now fine tuning, adjust midpoint of fingers to co-incide with cube center
+            else:
+                # Final grasp height
+                target_pos = cube_pos + np.array([0.0, 0.0, 0.0005])
+
+            # ---------- Gripper logic ----------
+            # Keep gripper open until arm is close enough
+            if midpoint_error > 0.005: # 2cm 
+                grip = 1.0          # open
+            else:
+                grip = 0.0          # close
+
+        # Amplify position error
+        pos_error = target_pos - midpoint_pos
         pos_error[0] *= 2.2
         pos_error[1] *= 2.2
 
@@ -343,28 +378,33 @@ class PandaGrasper(gym.Env):
         mujoco.mj_jacBody(self.model, data, jacp, None, self.hand_body_id)
         J = jacp[:, :7]
 
-        damping = 1e-4
+        damping = 1e-2
         JTJ = J.T @ J + damping * np.eye(7)
         dq = np.linalg.solve(JTJ, J.T @ pos_error)
 
         error_norm = np.linalg.norm(pos_error)
         alpha = np.clip(0.75 * error_norm, 0.2, 0.7)
-        q_target = np.clip(q + alpha * dq, -2.8, 2.8)
 
-        # ---------- 3. Gripper logic ----------
-        # Keep gripper open until geometry looks good
-        if (horizontal_error > 0.022 or
-            height_above_cube > 0.07 or
-            midpoint_error > 0.03 or
-            dist > 0.075):
-            grip = 1.0          # open
-        else:
-            # Close once we are close and well aligned
-            close_factor = np.clip((0.06 - dist) / 0.03, 0.0, 1.0)
-            grip = 1.0 - close_factor
+        # each joint has different limits: use self.model.jnt_range
+        """
+        J1: -2.9 to 2.9
+        J2: -1.76 to 1.76
+        J3: -2.9 to 2.9
+        J4: -3.07 to 0
+        J5: -2.9 tp 2.9
+        J6: 0 to 3.75
+        J7: -2.9 to 2.9
+        """
+        q_target = np.zeros_like(q)
+        q_target[0] = np.clip(q[0] + alpha * dq[0], -2.8, 2.8)
+        q_target[1] = np.clip(q[1] + alpha * dq[1], -1.6, 1.6)
+        q_target[2] = np.clip(q[2] + alpha * dq[2], -2.8, 2.8)
+        q_target[3] = np.clip(q[3] + alpha * dq[3], -3.0, -0.2)
+        q_target[4] = np.clip(q[4] + alpha * dq[4], -2.8, 2.8)
+        q_target[5] = np.clip(q[5] + alpha * dq[5], 0.1, 3.6)
+        q_target[6] = np.clip(q[6] + alpha * dq[6], -2.8, 2.8)
 
         return np.concatenate([q_target, [grip]])
-
     # write a function to drive the observe-act-observe outer loop
     def step(self, policy_action):
 
@@ -488,13 +528,11 @@ print("Obs shape:", obs.shape)
 n_steps = 300
 
 import time
-
 for _ in range(n_steps):
     action = env.action_space.sample()
 
     # step the simulation with the next action
     obs, reward, term, trunc, info = env.step(action)
-
     env.render()
 
     print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
@@ -503,7 +541,5 @@ for _ in range(n_steps):
     if term or trunc:
         print("Episode Ended: ", info)
         break
-
     time.sleep(0.2)
-
 env.close()
