@@ -4,9 +4,17 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 import os
+import torch
 
 # Import the Franka Panda Environment: PandaGrasper Class
 from franka_panda_grasp import PandaGrasper
+
+# Use CUDA when this PyTorch installation can access an NVIDIA GPU.
+device = "cuda" if torch.cuda.is_available() else "cpu"
+if device == "cuda":
+    print(f"Training device: {device} ({torch.cuda.get_device_name(0)})")
+else:
+    print(f"Training device: {device}")
 
 #1. Create and wrap the environment
 env = PandaGrasper()
@@ -24,7 +32,7 @@ model = PPO(
     gamma=0.99,          # discount factor
     ent_coef=0.01, # encourages some exploration
     tensorboard_log="robotics_mujoco\\panda_tensorboard",
-    device="cpu"
+    device=device
 )
 
 #3. Callbacks (optional but very useful)
