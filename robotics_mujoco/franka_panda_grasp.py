@@ -261,8 +261,8 @@ class PandaGrasper(gym.Env):
             reward += 60.0 * (cube_pos[2] - 0.08)
 
         # 8. Success
-        success = (cube_pos[2] > 0.05 and 
-                grip_closed)
+        success = cube_pos[2] > 0.10
+        
         if success:
             reward += 150.0
             self.success_count += 1
@@ -321,6 +321,29 @@ class PandaGrasper(gym.Env):
         # Fingertip positions (sites)
         left_tip  = data.site("left_fingertip").xpos.copy()
         right_tip = data.site("right_fingertip").xpos.copy()
+
+        # Finger vectors
+        finger_vec = right_tip - left_tip
+        finger_vec_norm = np.linalg.norm(finger_vec) + 1e-8
+        finger_dir = finger_vec/finger_vec_norm
+
+        # Cube vectors
+        R_cube = data.body(self.cube_body_id).xmat.reshape(3, 3)
+        cube_x_axis = R_cube[:, 0]
+        cube_y_axis = R_cube[:, 1]
+        cube_z_axis = R_cube[:, 2]
+
+        # Compute desired funger direction
+        ## choose the one which is more aligned to finger currently
+        ## to minimize actuator movement
+        if abs(np.dot(finger_dir, cube_x_axis)) >= abs(np.dot(finger_dir, cube_y_axis)):
+            desired_finger_dir = cube_x_axis * np.sign(np.dot(finger_dir, cube_x_axis))
+        else:
+            desired_finger_dir = cube_y_axis * np.sign(np.dot(finger_dir, cube_y_axis))
+
+        finger_ori_error = np.cross(finger_dir, desired_finger_dir)
+
+
         midpoint_pos  = 0.5 * (left_tip + right_tip) # position of midpoint of two fingers
         
         horizontal_error = np.linalg.norm((cube_pos - midpoint_pos)[:2]) # horizontaal distance between end effector and cube
@@ -336,7 +359,7 @@ class PandaGrasper(gym.Env):
         if self.grasp_state == "closed":
             self.grasp_state = "lift"
 
-        # ---------- Target + gripper depending on state ----------
+# ---------- Target + gripper depending on state ----------
         if self.grasp_state == "lift":
             # Keep gripper closed and go straight up
             target_pos = midpoint_pos.copy()
@@ -345,26 +368,29 @@ class PandaGrasper(gym.Env):
         else:
             # Phase 1: Coarse adjustment
 
-            ## Phase 1.1 First Adjust height and bring midpoint_pos 5 cm over the cube
-            if vertical_error > 0.2:
+            ## Phase 1.1 First Adjust height and bring midpoint_pos 10 cm over the cube
+            if vertical_error > 0.1:
+                print("Vertical_error: ", vertical_error)
                 target_pos = midpoint_pos.copy()
-                target_pos[2] = cube_pos[2] + 0.1
+                target_pos[2] = cube_pos[2] + 0.05
 
             ## Phase 1.2 Vertical adjustment complete: arm hovering 20 cm above the cube
             ## Adjust horizontal error
             elif horizontal_error > 0.05:
+                print("Horizontal error: ", horizontal_error)
                 target_pos = midpoint_pos.copy()
                 target_pos[:2] = cube_pos[:2]
 
             ## Phase 1.3 Micro Adjustment: both vertical and horizontal coarse adjustment done
             ## now fine tuning, adjust midpoint of fingers to co-incide with cube center
             else:
-                # Final grasp height
+                # Final grasp height = cube_pos + 0, 0, 1cm
                 target_pos = cube_pos + np.array([0.0, 0.0, dim_cube*0.2])
 
             # ---------- Gripper logic ----------
             # Keep gripper open until arm is close enough
-            if midpoint_error > dim_cube*0.3: # 2cm 
+            if midpoint_error > dim_cube*0.28: # 5cm * 0.3 = 1.5cm
+                print("midpoint_error: ", midpoint_error)
                 grip = 255.0          # open
             else:
                 grip = 0.0          # close
@@ -375,14 +401,43 @@ class PandaGrasper(gym.Env):
         pos_error[0] *= 2.2
         pos_error[1] *= 2.2
 
+        # Angular Error measurement
+        """
+        Hand Rotation Matrix:
+        R[:, 0] = local x-axis, of the hand (in world)
+        R[:, 1] = local y-axis
+        R[:, 2] = local z-axis
+
+        point z axis down
+        """
+        R = data.body(self.hand_body_id).xmat.reshape(3, 3)
+
+        z_current = R[:, 2]
+        z_desired = np.array([0.0, 0.0, -1.0])
+
+        # need to measure error in angle right? cross product gives good result
+        # zero when aligned, 1 when perpendicular
+        ori_error = np.cross(z_current, z_desired)
+
+        # Total error
+        ori_weight = 0.6
+        finger_ori_weight = 0.5
+        task_error = np.concatenate([pos_error, ori_weight * ori_error + finger_ori_weight *  finger_ori_error])
+
         # ---------- 2. Differential IK (damped least squares) ----------
-        jacp = np.zeros((3, self.model.nv))
-        mujoco.mj_jacBody(self.model, data, jacp, None, self.hand_body_id)
-        J = jacp[:, :7]
+        jacp = np.zeros((3, self.model.nv)) # translational
+        jacr = np.zeros((3, self.model.nv)) # rotational
+
+        mujoco.mj_jacBody(self.model, data, jacp, jacr, self.hand_body_id)
+        
+        J_pos = jacp[:, :7]
+        J_ori = jacr[:, :7]
+
+        J = np.vstack([J_pos, J_ori])
 
         damping = 1e-2
         JTJ = J.T @ J + damping * np.eye(7)
-        dq = np.linalg.solve(JTJ, J.T @ pos_error)
+        dq = np.linalg.solve(JTJ, J.T @ task_error)
 
         error_norm = np.linalg.norm(pos_error)
         alpha = np.clip(0.75 * error_norm, 0.2, 0.7)
@@ -454,7 +509,7 @@ class PandaGrasper(gym.Env):
 
         obs = self._get_obs()
         qpos_arm = obs[0:7]
-        qvel_arm = obs[7:14]
+        qvel_arm = obs[7:14] 
         finger1_pos = obs[14]
         finger2_pos = obs[15]
         relative_pos = obs[16:19]
