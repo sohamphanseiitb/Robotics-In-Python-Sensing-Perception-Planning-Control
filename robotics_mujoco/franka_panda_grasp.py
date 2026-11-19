@@ -80,6 +80,8 @@ class PandaGrasper(gym.Env):
 
         self.success_count = 0
         self.grasp_state = "approach"   # "approach" -> "closed" -> "lift"
+        self.vertical_closed = "not_done"
+        self.horizontal_closed = "not_done"
 
     # Write a function to obtain the observation from the environment
     def _get_obs(self):
@@ -261,7 +263,7 @@ class PandaGrasper(gym.Env):
             reward += 60.0 * (cube_pos[2] - 0.08)
 
         # 8. Success
-        success = cube_pos[2] > 0.10
+        success = cube_pos[2] > 0.18
         
         if success:
             reward += 150.0
@@ -352,8 +354,13 @@ class PandaGrasper(gym.Env):
         dim_cube = 2.0 * self.model.geom_size[self.cube_geom_id][0]
 
         # ---------- State machine ----------
+        if vertical_error < 0.1:
+            self.vertical_closed = "done"
+        if horizontal_error < 0.005:
+            self.horizontal_closed = "done"
+
         # approach -> closed -> lift
-        if self.grasp_state == "approach" and midpoint_error < 0.2*dim_cube:
+        if self.grasp_state == "approach" and midpoint_error < 0.15*dim_cube and self.horizontal_closed == "done":
             self.grasp_state = "closed"
 
         if self.grasp_state == "closed":
@@ -366,6 +373,7 @@ class PandaGrasper(gym.Env):
             target_pos[2] = cube_pos[2] + 0.18
             grip = 0.0
         else:
+
             # Phase 1: Coarse adjustment
 
             ## Phase 1.1 First Adjust height and bring midpoint_pos 10 cm over the cube
@@ -373,10 +381,12 @@ class PandaGrasper(gym.Env):
                 print("Vertical_error: ", vertical_error)
                 target_pos = midpoint_pos.copy()
                 target_pos[2] = cube_pos[2] + 0.05
+                target_pos[:2] = cube_pos[:2]
 
             ## Phase 1.2 Vertical adjustment complete: arm hovering 20 cm above the cube
             ## Adjust horizontal error
-            elif horizontal_error > 0.05:
+
+            elif horizontal_error > 0.005:
                 print("Horizontal error: ", horizontal_error)
                 target_pos = midpoint_pos.copy()
                 target_pos[:2] = cube_pos[:2]
@@ -385,13 +395,14 @@ class PandaGrasper(gym.Env):
             ## now fine tuning, adjust midpoint of fingers to co-incide with cube center
             else:
                 # Final grasp height = cube_pos + 0, 0, 1cm
-                target_pos = cube_pos + np.array([0.0, 0.0, dim_cube*0.2])
+                target_pos = cube_pos + np.array([0.0, 0.0, dim_cube*0.19])
 
             # ---------- Gripper logic ----------
             # Keep gripper open until arm is close enough
-            if midpoint_error > dim_cube*0.28: # 5cm * 0.3 = 1.5cm
+            if midpoint_error > dim_cube*0.15 and self.horizontal_closed == "not_done": # 5cm * 0.15 = 0.75cm = 0.0075
                 print("midpoint_error: ", midpoint_error)
                 grip = 255.0          # open
+                
             else:
                 grip = 0.0          # close
                 self.grasp_state = "closed"
