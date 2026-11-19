@@ -22,6 +22,7 @@ class PandaGrasper(gym.Env):
 
         # ID each object in the scene
         self.cube_body_id = self.model.body("cube").id # comes from <body name="cube">
+        self.cube_geom_id = self.model.geom("cube_geom").id
 
         '''
         # What is the hand?
@@ -68,7 +69,7 @@ class PandaGrasper(gym.Env):
         self.home_qpos = np.array([0, -0.785, 0, -2.356, 0., 1.571, 0.785])
 
         # set max number of steps per episode: before truncation/termination
-        self.max_episode_steps = 300
+        self.max_episode_steps = 500
         self.current_step = 0
 
         # multiple simulation substeps
@@ -260,10 +261,8 @@ class PandaGrasper(gym.Env):
             reward += 60.0 * (cube_pos[2] - 0.08)
 
         # 8. Success
-        success = (cube_pos[2] > 0.15 and 
-                grip_closed and 
-                left_contact and 
-                right_contact)
+        success = (cube_pos[2] > 0.05 and 
+                grip_closed)
         if success:
             reward += 150.0
             self.success_count += 1
@@ -317,19 +316,21 @@ class PandaGrasper(gym.Env):
         q = data.qpos[0:7].copy()
 
         # metrics
-        dist = np.linalg.norm(ee_pos - cube_pos) # distance between end effector and cube
-        horizontal_error = np.linalg.norm((cube_pos - ee_pos)[:2]) # horizontaal distance between end effector and cube
-        height_from_cube = abs(ee_pos[2] - cube_pos[2])
-
+        dist = np.linalg.norm(ee_pos - cube_pos) # distance between end effector and 
+        
         # Fingertip positions (sites)
         left_tip  = data.site("left_fingertip").xpos.copy()
         right_tip = data.site("right_fingertip").xpos.copy()
         midpoint_pos  = 0.5 * (left_tip + right_tip) # position of midpoint of two fingers
+        
+        horizontal_error = np.linalg.norm((cube_pos - midpoint_pos)[:2]) # horizontaal distance between end effector and cube
+        vertical_error = abs(midpoint_pos[2] - cube_pos[2])
         midpoint_error = np.linalg.norm(midpoint_pos - cube_pos)
+        dim_cube = 2.0 * self.model.geom_size[self.cube_geom_id][0]
 
         # ---------- State machine ----------
         # approach -> closed -> lift
-        if self.grasp_state == "approach" and midpoint_error < 0.02:
+        if self.grasp_state == "approach" and midpoint_error < 0.2*dim_cube:
             self.grasp_state = "closed"
 
         if self.grasp_state == "closed":
@@ -345,11 +346,11 @@ class PandaGrasper(gym.Env):
             # Phase 1: Coarse adjustment
 
             ## Phase 1.1 First Adjust height and bring midpoint_pos 5 cm over the cube
-            if height_from_cube > 0.2:
+            if vertical_error > 0.2:
                 target_pos = midpoint_pos.copy()
                 target_pos[2] = cube_pos[2] + 0.1
 
-            ## Phase 1.2 Vertical adjustment complete: arm hovering 10 cm above the cube
+            ## Phase 1.2 Vertical adjustment complete: arm hovering 20 cm above the cube
             ## Adjust horizontal error
             elif horizontal_error > 0.05:
                 target_pos = midpoint_pos.copy()
@@ -359,14 +360,15 @@ class PandaGrasper(gym.Env):
             ## now fine tuning, adjust midpoint of fingers to co-incide with cube center
             else:
                 # Final grasp height
-                target_pos = cube_pos + np.array([0.0, 0.0, 0.0005])
+                target_pos = cube_pos + np.array([0.0, 0.0, dim_cube*0.2])
 
             # ---------- Gripper logic ----------
             # Keep gripper open until arm is close enough
-            if midpoint_error > 0.005: # 2cm 
-                grip = 1.0          # open
+            if midpoint_error > dim_cube*0.3: # 2cm 
+                grip = 255.0          # open
             else:
                 grip = 0.0          # close
+                self.grasp_state = "closed"
 
         # Amplify position error
         pos_error = target_pos - midpoint_pos
@@ -405,6 +407,7 @@ class PandaGrasper(gym.Env):
         q_target[6] = np.clip(q[6] + alpha * dq[6], -2.8, 2.8)
 
         return np.concatenate([q_target, [grip]])
+    
     # write a function to drive the observe-act-observe outer loop
     def step(self, policy_action):
 
@@ -414,7 +417,7 @@ class PandaGrasper(gym.Env):
                                 self.action_space.high)
 
         # testing
-        # policy_action = np.zeros_like(policy_action)
+        policy_action = np.zeros_like(policy_action)
 
         # compute action from base controller
         base_action = self.classical_controller(self.data,
@@ -504,7 +507,8 @@ class PandaGrasper(gym.Env):
                 "cube_y":cube_pos[1],
                 "success": success,
                 "failure": failure,
-                "gripper": grip_command}
+                "gripper": grip_command,
+                "truncated": truncated}
 
         return obs, reward, terminated, truncated, info
 
@@ -522,24 +526,24 @@ class PandaGrasper(gym.Env):
 
 # Class Ends: write a test script
 
-# env = PandaGrasper(render_mode="human")
-# obs, info = env.reset()
-# print("Obs shape:", obs.shape)
-# n_steps = 300
+env = PandaGrasper(render_mode="human")
+obs, info = env.reset()
+print("Obs shape:", obs.shape)
+n_steps = 1000
 
-# import time
-# for _ in range(n_steps):
-#     action = env.action_space.sample()
+import time
+for _ in range(n_steps):
+    action = env.action_space.sample()
 
-#     # step the simulation with the next action
-#     obs, reward, term, trunc, info = env.step(action)
-#     env.render()
+    # step the simulation with the next action
+    obs, reward, term, trunc, info = env.step(action)
+    env.render()
 
-#     print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
-#     print(f"info: {info} \n")
+    print(f"reward: {reward:.3f}, dist: {info['distance']:.3f}")
+    print(f"info: {info} \n")
 
-#     if term or trunc:
-#         print("Episode Ended: ", info)
-#         break
-#     time.sleep(0.2)
-# env.close()
+    if term or trunc:
+        print("Episode Ended: ", info)
+        break
+    time.sleep(0.05)
+env.close()
