@@ -10,11 +10,13 @@ import torch
 from franka_panda_grasp import PandaGrasper
 
 # Use CUDA when this PyTorch installation can access an NVIDIA GPU.
-device = "cuda" if torch.cuda.is_available() else "cpu"
-if device == "cuda":
-    print(f"Training device: {device} ({torch.cuda.get_device_name(0)})")
-else:
-    print(f"Training device: {device}")
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+# if device == "cuda":
+#     print(f"Training device: {device} ({torch.cuda.get_device_name(0)})")
+# else:
+#     print(f"Training device: {device}")
+
+device = "cpu"
 
 #1. Create and wrap the environment
 env = PandaGrasper()

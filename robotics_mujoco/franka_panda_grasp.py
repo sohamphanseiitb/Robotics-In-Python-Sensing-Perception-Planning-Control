@@ -52,8 +52,8 @@ class PandaGrasper(gym.Env):
         ## approximately joint limits of the Panda, (in radians)
         # earlier were -2.9 and 2.9, now changed to -0.3 and 0.3 to accomodate for additional inputs
         # coming from base controller
-        self.action_space = spaces.Box(low=np.array([-0.2]*7 + [-0.3]),
-                                       high=np.array([0.2]*7 + [0.3]),
+        self.action_space = spaces.Box(low=np.array([-0.08]*7 + [-0.05]),
+                                       high=np.array([0.08]*7 + [0.05]),
                                        dtype=np.float64)
         # Observation:
         ## [qpos_arm[7], qvel_arm[7], finger1_pos(1), finger2_pos(1), rel_pos(3), dist(1), 
@@ -174,6 +174,8 @@ class PandaGrasper(gym.Env):
 
         # set state machine
         self.grasp_state = "approach"
+        self.vertical_closed = "not_done"
+        self.horizontal_closed = "not_done"
 
         """
         A body that has a <freejoint> does not store its position in body.pos permanently.
@@ -378,7 +380,7 @@ class PandaGrasper(gym.Env):
 
             ## Phase 1.1 First Adjust height and bring midpoint_pos 10 cm over the cube
             if vertical_error > 0.1:
-                print("Vertical_error: ", vertical_error)
+                # print("Vertical_error: ", vertical_error)
                 target_pos = midpoint_pos.copy()
                 target_pos[2] = cube_pos[2] + 0.05
                 target_pos[:2] = cube_pos[:2]
@@ -387,7 +389,7 @@ class PandaGrasper(gym.Env):
             ## Adjust horizontal error
 
             elif horizontal_error > 0.005:
-                print("Horizontal error: ", horizontal_error)
+                # print("Horizontal error: ", horizontal_error)
                 target_pos = midpoint_pos.copy()
                 target_pos[:2] = cube_pos[:2]
 
@@ -400,8 +402,8 @@ class PandaGrasper(gym.Env):
             # ---------- Gripper logic ----------
             # Keep gripper open until arm is close enough
             if midpoint_error > dim_cube*0.15 and self.horizontal_closed == "not_done": # 5cm * 0.15 = 0.75cm = 0.0075
-                print("midpoint_error: ", midpoint_error)
-                grip = 255.0          # open
+                # print("midpoint_error: ", midpoint_error)
+                grip = 1.0          # open
                 
             else:
                 grip = 0.0          # close
@@ -487,7 +489,10 @@ class PandaGrasper(gym.Env):
                                                 self.data.body(self.cube_body_id).xpos,
                                                 self.data.body(self.hand_body_id).xpos)
 
-        final_action = base_action #+ 0.2*policy_action
+        final_action = base_action.copy()
+        final_action[:7] = base_action[:7] + 0.15*policy_action[:7]
+        final_action[7] = base_action[7] # gripper control as per baseline control
+
         final_action[:7] = np.clip(final_action[:7], -2.9, 2.9)
         final_action[7] = np.clip(final_action[7], 0.0, 1.0)
         
