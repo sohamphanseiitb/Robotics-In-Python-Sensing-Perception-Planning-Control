@@ -229,14 +229,14 @@ class PandaGrasper(gym.Env):
         horizontal_error = np.linalg.norm(cube_pos[:2] - ee_pos[:2])
         reward -= 2.5 * horizontal_error
 
-        # 3. Approach from above
+        # 3. Approach from above: dist < 15 cm and ee_z > cube_z + 5cm
         if dist < 0.15 and ee_pos[2] > cube_pos[2] + 0.05:
-            reward += 4.0
+            reward += 0.5
 
         # 4. Orientation: prefer top-down (hand z-axis pointing down)
         if dist < 0.18:
             alignment = np.dot(hand_z_axis, np.array([0.0, 0.0, -1.0]))
-            reward += 5.0 * max(alignment, 0.0)
+            reward += 0.5 * max(alignment, 0.0)
 
         # fingers are grasping the cube from adjacent faces which is a problem  
         midpoint = 0.5 * (left_tip_pos + right_tip_pos)
