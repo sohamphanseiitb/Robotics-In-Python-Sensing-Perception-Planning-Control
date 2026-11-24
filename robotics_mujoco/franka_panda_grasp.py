@@ -256,19 +256,21 @@ class PandaGrasper(gym.Env):
         grip_closed = finger_dist < 0.025
 
         if left_contact and right_contact and grip_closed:
-            reward += 8.0
+            reward += 2.0
         elif dist < 0.04 and not (left_contact or right_contact):
             reward -= 3.0                         # milder than -10
 
         # 7. Lifting
         if left_contact and right_contact and grip_closed and cube_pos[2] > 0.08:
-            reward += 60.0 * (cube_pos[2] - 0.08)
+            reward += 10.0 * (cube_pos[2] - 0.08)
+        elif left_contact and right_contact and grip_closed and cube_pos[2] > 0.15:
+            reward += 20.0 * (cube_pos[2] - 0.15)
 
         # 8. Success
         success = cube_pos[2] > 0.18
         
         if success:
-            reward += 150.0
+            reward += 150.0 * (cube_pos[2] - 0.18)
             self.success_count += 1
 
         # 9. Failure
@@ -276,7 +278,7 @@ class PandaGrasper(gym.Env):
                 abs(cube_pos[0]) > 1.0 or 
                 abs(cube_pos[1]) > 0.8)
         if failure:
-            reward -= 40.0
+            reward -= 400.0
 
         # 10. Action penalty
         reward -= 0.0001 * np.sum(np.square(action[:7]))

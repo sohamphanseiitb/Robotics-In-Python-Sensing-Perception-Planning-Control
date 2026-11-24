@@ -2,6 +2,7 @@ import argparse
 import csv
 from pathlib import Path
 from statistics import mean
+import time
 
 import numpy as np
 from stable_baselines3 import PPO
@@ -26,6 +27,7 @@ def evaluate(env, model, seed, render):
         steps += 1
         if render:
             env.render()
+            time.sleep(0.1)
 
     return {
         "seed": seed,
